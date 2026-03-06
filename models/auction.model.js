@@ -2,6 +2,11 @@ const { sequelize } = require('../utils/db');
 const {DataTypes} = require("sequelize");
 
 const Auction = sequelize.define('auction' , {
+    id : {
+        type: DataTypes.INTEGER,
+        primaryKey: true,
+        autoIncrement: true,
+    },
     title : {
         type : DataTypes.STRING,
         allowNull : false ,
