@@ -35,21 +35,34 @@ io.on('connection', (socket) => {
         // console.log('User disconnected : ' + socket.id);
     });
 
-    socket.on('joinAuction', async (payload,ack) => {
+    socket.on('joinAuction', async (payload, ack) => {
         try {
-            if( typeof ack === 'function' ) {
-                ack({ error : 'missing ack function' });
+
+            if (typeof ack !== 'function') {
+                return ack({error: 'missing ack function'});
             }
-            if(!payload){
-                return ack({error : 'payload missing'});
+
+            if (!payload) {
+                return ack({error: 'payload missing'});
             }
+
             const auctionId = payload.auctionId;
             console.log('user ' + socket.user.email + ' trying to join ' + auctionId);
-            await auctionSocketController.joinAuction( socket,auctionId );
-            return ack({ msg : 'ok' , auctionId });
+
+            let joinnedBefore = false ;
+            socket.rooms.forEach((room) => {
+                joinnedBefore |= ( room == auctionId );
+            })
+
+            if (joinnedBefore) {
+                return ack({error: 'already in this auction'});
+            }
+
+            await auctionSocketController.auctionIdValidation(socket, auctionId);
+            return ack({msg: 'ok', auctionId});
         } catch (error) {
             console.log(error);
-            ack({error: error.message || error});
+            return ack({error: error.message || error});
         }
     });
 

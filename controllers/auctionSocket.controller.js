@@ -1,5 +1,5 @@
 const Auction = require('../models/auction.model')
-exports.joinAuction = async (socket, auctionId) => {
+exports.auctionIdValidation = async (socket, auctionId) => {
     const auction = await Auction.findByPk(auctionId);
     if (!auction) {
         const err = new Error("This auction does not exist");

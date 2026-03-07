@@ -164,8 +164,8 @@ const realtime = {
             return;
         }
 
-        state.socket.timeout(5000).emit("joinAuction", {auctionId}, (res) => {
-            if (!res) {
+        state.socket.timeout(10000).emit("joinAuction", {auctionId}, (err ,res) => {
+            if (err) {
                 const msg = "No response from server while joining auction";
                 setBidMessage(msg, true);
                 log(msg);
