@@ -1,5 +1,6 @@
 const Auction = require('./auction.model');
 const User = require('./user.model');
+const BiddingLogs = require('./biddingLogs.model');
 
 exports.initAssociations = () => {
 
@@ -24,6 +25,22 @@ exports.initAssociations = () => {
         foreignKey : 'winner'
     });
 
+
+    Auction.belongsToMany(User, {
+        as: 'auctionBids',
+        through: BiddingLogs,
+        onDelete: 'CASCADE',
+        foreignKey: 'auctionId' ,
+        otherKey: 'userId'
+    });
+
+    User.belongsToMany(Auction, {
+        as : 'bids' ,
+        through: BiddingLogs,
+        onDelete: 'CASCADE',
+        foreignKey: 'userId' ,
+        otherKey : 'auctionId'
+    });
 
 
 }

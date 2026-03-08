@@ -24,6 +24,19 @@ function log(msg) {
     $("log").prepend(el);
 }
 
+function applyAuctionSnapshot(auctionSnapshot) {
+    if (!auctionSnapshot || auctionSnapshot.id == null) return null;
+    const auctionId = String(auctionSnapshot.id);
+    const previous = state.auctions[auctionId] || {currentBid: 0, bidder: "-", timeLeft: "-"};
+    state.auctions[auctionId] = {
+        ...previous,
+        currentBid: auctionSnapshot.currentBid ?? auctionSnapshot.startPrice ?? previous.currentBid ?? 0,
+        bidder: auctionSnapshot.winner ?? previous.bidder ?? "-",
+        timeLeft: previous.timeLeft ?? "-",
+    };
+    return auctionId;
+}
+
 function updateAuctionUI(auctionId) {
     const data = state.auctions[auctionId];
     $("selectedAuction").textContent = auctionId || "-";
@@ -66,10 +79,11 @@ function addJoinedAuction(id) {
 }
 
 function selectAuction(id) {
-    state.auctionId = id;
-    $("auctionSelect").value = id;
-    log(`Selected auction ${id}`);
-    updateAuctionUI(id);
+    const normalizedId = String(id);
+    state.auctionId = normalizedId;
+    $("auctionSelect").value = normalizedId;
+    log(`Selected auction ${normalizedId}`);
+    updateAuctionUI(normalizedId);
 }
 
 const SOCKET_SERVER_URL = "http://localhost:3000";
@@ -146,6 +160,35 @@ const realtime = {
                 log(`Socket disconnected: ${reason}`);
             });
 
+            socket.on("auction:update", (payload) => {
+
+                let{ auctionId , bidder , amount } = payload;
+
+                if(!auctionId) return;
+                auctionId = String(auctionId);
+
+                const previous = state.auctions[auctionId] || {currentBid: 0, bidder: "-", timeLeft: "-"};
+                if(bidder == null) bidder = previous.bidder;
+                if(amount == null) amount = previous.currentBid;
+
+                state.auctions[auctionId] = {
+                    ...previous,
+                    currentBid: amount,
+                    bidder,
+                };
+
+                if ($("auctionSelect").querySelector(`option[value="${auctionId}"]`) == null) {
+                    addJoinedAuction(auctionId);
+                }
+
+                if (state.auctionId === auctionId) {
+                    updateAuctionUI(auctionId);
+                    setBidMessage(`Auction ${auctionId} updated`);
+                }
+
+                log(`Auction ${auctionId} updated: bid $${state.auctions[auctionId].currentBid} by ${state.auctions[auctionId].bidder}`);
+            });
+
             state.socket = socket;
             socket.connect();
         } catch (err) {
@@ -178,7 +221,7 @@ const realtime = {
                 return;
             }
 
-            const joinedAuctionId = res.auctionId || auctionId;
+            const joinedAuctionId = applyAuctionSnapshot(res?.auction) || String(res?.auctionId || auctionId);
             state.auctionId = joinedAuctionId;
             addJoinedAuction(joinedAuctionId);
             log(`Joined auction ${joinedAuctionId}`);
@@ -197,12 +240,33 @@ const realtime = {
             return;
         }
 
-        state.socket.emit("placeBid", {
+        if (!state.auctionId) {
+            const msg = "Select an auction first";
+            setBidMessage(msg, true);
+            log(msg);
+            return;
+        }
+
+        state.socket.timeout(5000).emit("placeBid", {
             auctionId: state.auctionId,
             amount
+        }, (err, res) => {
+            if (err) {
+                const msg = "No response from server while placing bid";
+                setBidMessage(msg, true);
+                log(msg);
+                return;
+            }
+
+            if (res?.error) {
+                setBidMessage(res.error, true);
+                log(`Bid failed on auction ${state.auctionId}: ${res.error}`);
+                return;
+            }
+
+            log(`Bid accepted: $${amount} on ${state.auctionId}`);
+            setBidMessage("Bid accepted");
         });
-        log(`Bid sent: $${amount}`);
-        setBidMessage("Bid sent");
     }
 };
 
