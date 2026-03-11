@@ -1,17 +1,56 @@
 const Auction = require('../models/auction.model')
 const BiddingLogs = require("../models/biddingLogs.model");
-const auctionIdValidation = async (socket, auctionId) => {
-    const auction = await Auction.findByPk(auctionId);
-    if (!auction) {
-        const err = new Error("This auction does not exist");
+const User = require('../models/user.model');
+
+const getAuctionTiming = (auction) => {
+    const startTimeMs = new Date(auction.startTime).getTime();
+    const durationSeconds = Number(auction.duration);
+    if (!Number.isFinite(startTimeMs) || !Number.isFinite(durationSeconds)) {
+        const err = new Error('Invalid auction timing configuration');
         err.statusCode = 500;
         throw err;
     }
-    await socket.join(String(auction.id));
-    return { auction };
+    return {
+        startTimeMs,
+        endTimeMs: startTimeMs + (durationSeconds * 1000),
+    };
+};
+
+const auctionIdValidation = async (socket, auctionId) => {
+    const auction = await Auction.findByPk(auctionId , {
+        include: [
+            {
+                model : User ,
+                as : 'seller'
+            }
+        ]
+    });
+
+    // if no auction with that id
+    if (!auction) {
+        const err = new Error("This auction does not exist");
+        err.statusCode = 404;
+        throw err;
+    }
+
+    // if the auction has ended
+    const {startTimeMs, endTimeMs} = getAuctionTiming(auction);
+    if (Date.now() >= endTimeMs) {
+        const err = new Error("Auction expired");
+        err.statusCode = 409;
+        throw err;
+    }
+
+    if( socket.user.userId === auction.seller.id ){
+        const err = new Error("You are the creator of this auction you are not allowed to join it.");
+        err.statusCode = 403;
+        throw err;
+    }
+
+    return { auction, startTimeMs, endTimeMs, roomId: String(auction.id) };
 }
 
-const joinAuction = async (socket, payload, ack) => {
+const joinAuction = async (socket, payload, ack, io) => {
     try {
 
         if (typeof ack !== 'function') {
@@ -22,20 +61,25 @@ const joinAuction = async (socket, payload, ack) => {
             return ack({error: 'payload missing'});
         }
 
-        const auctionId = payload.auctionId;
+        const auctionId = String(payload.auctionId);
         console.log('user ' + socket.user.email + ' trying to join ' + auctionId);
 
-        let joinnedBefore = false;
-        socket.rooms.forEach((room) => {
-            joinnedBefore |= (room == auctionId);
-        })
+        const { auction, endTimeMs, roomId } = await auctionIdValidation(socket, auctionId);
 
-        if (joinnedBefore) {
+        if (socket.rooms.has(roomId)) {
             return ack({error: 'already in this auction'});
         }
 
-        const { auction } = await auctionIdValidation(socket, auctionId);
-        return ack({ msg: 'ok', auction });
+        await socket.join(roomId);
+
+        const serverNowMs = Date.now();
+        socket.emit('startCountDown', {
+            auctionId: roomId,
+            endTime: endTimeMs,
+            serverNow: serverNowMs,
+        });
+
+        ack({ msg: 'ok', auction, auctionId: roomId, endTime: endTimeMs, serverNow: serverNowMs });
     } catch (error) {
         console.log(error);
         return ack({error: error.message || error});
@@ -95,6 +139,29 @@ const placeBid = async ( payload , ack , sequelize , io , socket ) => {
                 transaction: t,
                 lock: t.LOCK.UPDATE,
             });
+
+            if (!auction) {
+                const err = new Error("This auction does not exist");
+                err.statusCode = 404;
+                throw err;
+            }
+
+            const {startTimeMs, endTimeMs} = getAuctionTiming(auction);
+            const nowMs = Date.now();
+
+            // cant place a bid, the auction hasnt started yet
+            if (nowMs < startTimeMs) {
+                const err = new Error('This auction has not started yet.');
+                err.statusCode = 409;
+                throw err;
+            }
+
+            // cant place a bit, the auction has finished
+            if (nowMs >= endTimeMs) {
+                const err = new Error('This auction is already finished.');
+                err.statusCode = 409;
+                throw err;
+            }
 
             await bidValidation(auctionId, amount, {
                 transaction: t,

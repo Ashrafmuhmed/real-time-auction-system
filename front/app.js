@@ -5,8 +5,81 @@ const state = {
     auctionId: null,
     token: null,
     socket: null,
-    auctions: {}
+    auctions: {},
+    countdowns: {}
 };
+
+function formatRemainingTime(milliseconds) {
+    if (milliseconds <= 0) return "Ended";
+    const totalSeconds = Math.ceil(milliseconds / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    return [hours, minutes, seconds]
+        .map((value) => String(value).padStart(2, "0"))
+        .join(":");
+}
+
+function ensureAuctionState(auctionId) {
+    const normalizedId = String(auctionId);
+    if (!state.auctions[normalizedId]) {
+        state.auctions[normalizedId] = {
+            currentBid: 0,
+            bidder: "-",
+            timeLeft: "-"
+        };
+    }
+    return state.auctions[normalizedId];
+}
+
+function stopCountdown(auctionId) {
+    const normalizedId = String(auctionId);
+    const countdown = state.countdowns[normalizedId];
+    if (!countdown) return;
+    if (countdown.intervalId) clearInterval(countdown.intervalId);
+    delete state.countdowns[normalizedId];
+}
+
+function renderCountdown(auctionId) {
+    const normalizedId = String(auctionId);
+    const countdown = state.countdowns[normalizedId];
+    if (!countdown) return;
+    const auctionState = ensureAuctionState(normalizedId);
+    const nowMs = Date.now() + (countdown.offsetMs || 0);
+    const remaining = countdown.endTimeMs - nowMs;
+    auctionState.timeLeft = formatRemainingTime(remaining);
+    if (state.auctionId === normalizedId) {
+        updateAuctionUI(normalizedId);
+    }
+    if (remaining <= 0) {
+        stopCountdown(normalizedId);
+    }
+}
+
+function startCountdown(auctionId, endTimeMs, serverNowMs) {
+    if (!auctionId || !Number.isFinite(endTimeMs)) return;
+    const normalizedId = String(auctionId);
+    ensureAuctionState(normalizedId);
+    stopCountdown(normalizedId);
+
+    const offsetMs = Number.isFinite(serverNowMs) ? (serverNowMs - Date.now()) : 0;
+    state.countdowns[normalizedId] = {
+        intervalId: null,
+        endTimeMs,
+        offsetMs,
+    };
+
+    renderCountdown(normalizedId);
+    if (endTimeMs <= (Date.now() + offsetMs)) return;
+
+    state.countdowns[normalizedId].intervalId = window.setInterval(() => {
+        renderCountdown(normalizedId);
+    }, 1000);
+}
+
+function stopAllCountdowns() {
+    Object.keys(state.countdowns).forEach((auctionId) => stopCountdown(auctionId));
+}
 
 function setStatus(text) {
     $("connStatus").textContent = text;
@@ -18,6 +91,24 @@ function setBidMessage(message, isError = false) {
     node.style.color = isError ? "#c0392b" : "";
 }
 
+function isAuctionEnded(auctionId) {
+    const normalizedId = String(auctionId);
+    const countdown = state.countdowns[normalizedId];
+    if (countdown && Number.isFinite(countdown.endTimeMs)) {
+        return (Date.now() + (countdown.offsetMs || 0)) >= countdown.endTimeMs;
+    }
+    return state.auctions[normalizedId]?.timeLeft === "Ended";
+}
+
+function updateBidControls(auctionId) {
+    const button = $("btnBid");
+    const ended = auctionId ? isAuctionEnded(auctionId) : false;
+    button.style.display = ended ? "none" : "";
+    if (ended) {
+        setBidMessage("Auction ended. Bidding is closed.", true);
+    }
+}
+
 function log(msg) {
     const el = document.createElement("div");
     el.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
@@ -27,7 +118,7 @@ function log(msg) {
 function applyAuctionSnapshot(auctionSnapshot) {
     if (!auctionSnapshot || auctionSnapshot.id == null) return null;
     const auctionId = String(auctionSnapshot.id);
-    const previous = state.auctions[auctionId] || {currentBid: 0, bidder: "-", timeLeft: "-"};
+    const previous = ensureAuctionState(auctionId);
     state.auctions[auctionId] = {
         ...previous,
         currentBid: auctionSnapshot.currentBid ?? auctionSnapshot.startPrice ?? previous.currentBid ?? 0,
@@ -44,11 +135,13 @@ function updateAuctionUI(auctionId) {
         $("currentBid").textContent = "$0";
         $("currentBidder").textContent = "-";
         $("timeLeft").textContent = "-";
+        updateBidControls(null);
         return;
     }
     if (data.currentBid != null) $("currentBid").textContent = `$${data.currentBid}`;
     if (data.bidder != null) $("currentBidder").textContent = data.bidder;
     if (data.timeLeft != null) $("timeLeft").textContent = data.timeLeft;
+    updateBidControls(auctionId);
 }
 
 function addJoinedAuction(id) {
@@ -128,6 +221,7 @@ const realtime = {
                 state.socket.disconnect();
                 state.socket = null;
             }
+            stopAllCountdowns();
 
             setStatus("Connecting...");
             setBidMessage("");
@@ -158,18 +252,20 @@ const realtime = {
                 state.connected = false;
                 setStatus("Disconnected");
                 log(`Socket disconnected: ${reason}`);
+                stopAllCountdowns();
+                updateAuctionUI(state.auctionId);
             });
 
             socket.on("auction:update", (payload) => {
 
-                let{ auctionId , bidder , amount } = payload;
+                let {auctionId, bidder, amount} = payload;
 
-                if(!auctionId) return;
+                if (!auctionId) return;
                 auctionId = String(auctionId);
 
-                const previous = state.auctions[auctionId] || {currentBid: 0, bidder: "-", timeLeft: "-"};
-                if(bidder == null) bidder = previous.bidder;
-                if(amount == null) amount = previous.currentBid;
+                const previous = ensureAuctionState(auctionId);
+                if (bidder == null) bidder = previous.bidder;
+                if (amount == null) amount = previous.currentBid;
 
                 state.auctions[auctionId] = {
                     ...previous,
@@ -187,6 +283,12 @@ const realtime = {
                 }
 
                 log(`Auction ${auctionId} updated: bid $${state.auctions[auctionId].currentBid} by ${state.auctions[auctionId].bidder}`);
+            });
+
+            socket.on("startCountDown", (payload) => {
+                const {auctionId, endTime, serverNow} = payload || {};
+                if (!auctionId || endTime == null) return;
+                startCountdown(auctionId, Number(endTime), Number(serverNow));
             });
 
             state.socket = socket;
@@ -207,7 +309,7 @@ const realtime = {
             return;
         }
 
-        state.socket.timeout(10000).emit("joinAuction", {auctionId}, (err ,res) => {
+        state.socket.timeout(10000).emit("joinAuction", {auctionId}, (err, res) => {
             if (err) {
                 const msg = "No response from server while joining auction";
                 setBidMessage(msg, true);
@@ -224,11 +326,12 @@ const realtime = {
             const joinedAuctionId = applyAuctionSnapshot(res?.auction) || String(res?.auctionId || auctionId);
             state.auctionId = joinedAuctionId;
             addJoinedAuction(joinedAuctionId);
+            if (res?.endTime != null) {
+                startCountdown(joinedAuctionId, Number(res.endTime), Number(res.serverNow));
+            }
             log(`Joined auction ${joinedAuctionId}`);
             setBidMessage(`Joined auction ${joinedAuctionId}`);
-            if (!state.auctions[joinedAuctionId]) {
-                state.auctions[joinedAuctionId] = {currentBid: 0, bidder: "-", timeLeft: "-"};
-            }
+            ensureAuctionState(joinedAuctionId);
             updateAuctionUI(joinedAuctionId);
         });
     },
@@ -244,6 +347,14 @@ const realtime = {
             const msg = "Select an auction first";
             setBidMessage(msg, true);
             log(msg);
+            return;
+        }
+
+        if (isAuctionEnded(state.auctionId)) {
+            const msg = "Auction ended. You can't place a bid.";
+            setBidMessage(msg, true);
+            log(msg);
+            updateBidControls(state.auctionId);
             return;
         }
 

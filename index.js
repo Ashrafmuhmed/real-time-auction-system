@@ -36,7 +36,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('joinAuction', async (payload, ack) => {
-        return await auctionSocketController.joinAuction( socket , payload, ack );
+        return await auctionSocketController.joinAuction(socket, payload, ack, io);
     });
 
     socket.on( 'placeBid' , async ( payload , ack ) => {
