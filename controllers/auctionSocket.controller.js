@@ -33,6 +33,18 @@ const auctionIdValidation = async (socket, auctionId) => {
         throw err;
     }
 
+    if (auction.status === 'ended') {
+        const err = new Error("Auction has ended");
+        err.statusCode = 409;
+        throw err;
+    }
+
+    if (auction.status === 'cancelled') {
+        const err = new Error("Auction has been cancelled");
+        err.statusCode = 409;
+        throw err;
+    }
+
     // if the auction has ended
     const {startTimeMs, endTimeMs} = getAuctionTiming(auction);
     if (Date.now() >= endTimeMs) {
@@ -97,6 +109,18 @@ const bidValidation = async (auctionId, amount, options = {}) => {
         throw err;
     }
 
+    if (auction.status === 'ended') {
+        const err = new Error("Auction has ended");
+        err.statusCode = 409;
+        throw err;
+    }
+
+    if (auction.status === 'cancelled') {
+        const err = new Error("Auction has been cancelled");
+        err.statusCode = 409;
+        throw err;
+    }
+
     if (auction.currentBid == null) {
 
         // make sure the bid is higher than the start price
@@ -119,6 +143,30 @@ const bidValidation = async (auctionId, amount, options = {}) => {
 
 };
 
+const endExpiredAuctions = async (sequelize, io) => {
+    const auctions = await Auction.findAll({
+        where: {
+            status: 'active'
+        }
+    });
+
+    for (const auction of auctions) {
+        const {startTimeMs, endTimeMs} = getAuctionTiming(auction);
+        if (Date.now() >= endTimeMs) {
+            auction.status = 'ended';
+            await auction.save();
+
+            io.to(String(auction.id)).emit('auction:ended', {
+                auctionId: auction.id,
+                winner: auction.winner,
+                finalBid: auction.currentBid
+            });
+
+            console.log(`Auction ${auction.id} ended automatically`);
+        }
+    }
+};
+
 const placeBid = async ( payload , ack , sequelize , io , socket ) => {
     if (typeof ack !== 'function') {
         return;
@@ -133,6 +181,8 @@ const placeBid = async ( payload , ack , sequelize , io , socket ) => {
             return ack({error: 'missing payload data'});
         }
         console.log('placing bid', {user: socket.user.email, auctionId, amount});
+
+        await endExpiredAuctions(sequelize, io);
 
         await sequelize.transaction(async (t) => {
             const auction = await Auction.findByPk(auctionId, {
@@ -196,5 +246,6 @@ module.exports = {
     auctionIdValidation,
     joinAuction,
     bidValidation,
-    placeBid
+    placeBid,
+    endExpiredAuctions
 };

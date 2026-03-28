@@ -46,6 +46,14 @@ io.on('connection', (socket) => {
 
 });
 
+setInterval(async () => {
+    try {
+        await auctionSocketController.endExpiredAuctions(sequelize, io);
+    } catch (err) {
+        console.error('Error in auto-end auction job:', err);
+    }
+}, 10000);
+
 
 app.use('/auth', authRouter);
 app.use('/auction', isAuthenticated, auctionRouter);

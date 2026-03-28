@@ -8,5 +8,8 @@ router.post( '/', auctionValidation.auctionCreationValidator ,auctionController.
 
 router.delete( '/:auction_id' , auctionController.removeAuction );
 
+router.put( '/:auction_id/start', auctionController.startAuction );
+router.put( '/:auction_id/end', auctionController.endAuction );
+
 
 module.exports = router;

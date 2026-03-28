@@ -37,3 +37,21 @@ exports.sendPasswordResetEmail = async ({to, name, resetUrl}) => {
             '<p>If you did not request this, ignore this email.</p>',
     });
 };
+
+exports.sendAuctionEndedEmail = async ({to, name, auctionTitle, winningBid}) => {
+    assertSendGridReady();
+
+    await sgMail.send({
+        to,
+        from: process.env.SENDGRID_FROM_EMAIL,
+        subject: `Congratulations! You won the auction: ${auctionTitle}`,
+        text:
+            `Hello ${name || ''},\n\n` +
+            `Congratulations! You have won the auction "${auctionTitle}" with a bid of $${winningBid}.\n\n` +
+            'Please contact the seller for next steps.',
+        html:
+            `<p>Hello ${name || ''},</p>` +
+            `<p>Congratulations! You have won the auction "<strong>${auctionTitle}</strong>" with a bid of <strong>$${winningBid}</strong>.</p>` +
+            '<p>Please contact the seller for next steps.</p>',
+    });
+};
