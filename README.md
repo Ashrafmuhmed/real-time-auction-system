@@ -1,12 +1,12 @@
 # Real-Time Live Bidding Auction System
 
-A Node.js + Socket.IO real-time auction platform.
+A real-time auction platform where users can create auctions, place bids, and watch live updates as the action happens. Built with Socket.IO for instant bid notifications and countdown timers.
 
 ## Features
 
+- Real-time bid updates via WebSocket
 - User authentication (register/login)
-- Create, start, and end auctions
-- Real-time bidding with Socket.IO
+- Create and manage auctions
 - Live countdown timers
 - Bid history tracking
 
@@ -15,30 +15,6 @@ A Node.js + Socket.IO real-time auction platform.
 - **Backend:** Node.js, Express, Socket.IO
 - **Database:** PostgreSQL, Sequelize
 - **Auth:** JWT, bcrypt
-- **Frontend:** Vanilla JS
-
-## Setup
-
-```bash
-npm install
-```
-
-Create `.env` file:
-
-```env
-PORT=3000
-DB_HOST=localhost
-DB_NAME=auction_db
-DB_USER=postgres
-DB_PASS=your_password
-JWT_SECRET=your_secret
-```
-
-```bash
-npm start
-```
-
-Open `front/index.html` in browser.
 
 ## API Endpoints
 
