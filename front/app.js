@@ -1,13 +1,230 @@
 const $ = (id) => document.getElementById(id);
 
+const API_BASE = "http://localhost:3000";
+
 const state = {
     connected: false,
     auctionId: null,
     token: null,
+    adminToken: null,
     socket: null,
     auctions: {},
     countdowns: {}
 };
+
+function setAdminMessage(message, isError = false) {
+    const node = $("adminMessage");
+    node.textContent = message;
+    node.style.color = isError ? "#c0392b" : "";
+}
+
+function setCreateMessage(message, isError = false) {
+    const node = $("createMessage");
+    node.textContent = message;
+    node.style.color = isError ? "#c0392b" : "";
+}
+
+async function apiRequest(endpoint, method = "GET", body = null, token) {
+    const headers = {
+        "Content-Type": "application/json"
+    };
+    if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+    }
+
+    const options = { method, headers };
+    if (body) {
+        options.body = JSON.stringify(body);
+    }
+
+    const res = await fetch(`${API_BASE}${endpoint}`, options);
+    const data = await res.json();
+    if (!res.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+    }
+    return data;
+}
+
+function setAuthMessage(message, isError = false) {
+    const node = $("authMessage");
+    node.textContent = message;
+    node.style.color = isError ? "#c0392b" : "";
+}
+
+function updateAuthUI() {
+    const authSection = $("authSection");
+    const mainSection = $("mainAppSection");
+    const userInfo = $("userInfo");
+
+    if (state.token) {
+        authSection.classList.add("hidden");
+        mainSection.classList.remove("hidden");
+        $("tokenInput").value = state.token;
+        $("adminTokenInput").value = state.token;
+        userInfo.innerHTML = `<span>Logged in</span> <button id="btnLogout">Logout</button>`;
+        $("btnLogout").addEventListener("click", logout);
+    } else {
+        authSection.classList.remove("hidden");
+        mainSection.classList.add("hidden");
+        userInfo.innerHTML = "";
+    }
+}
+
+async function login() {
+    const email = $("loginEmail").value.trim();
+    const password = $("loginPassword").value;
+
+    if (!email || !password) {
+        setAuthMessage("Email and password required", true);
+        return;
+    }
+
+    try {
+        const data = await apiRequest("/auth/login", "POST", { email, password });
+        state.token = data.token;
+        localStorage.setItem("auctionToken", state.token);
+        setAuthMessage("Login successful!");
+        updateAuthUI();
+        log("Logged in successfully");
+    } catch (err) {
+        setAuthMessage(err.message, true);
+    }
+}
+
+async function register() {
+    const name = $("regName").value.trim();
+    const email = $("regEmail").value.trim();
+    const password = $("regPassword").value;
+
+    if (!name || !email || !password) {
+        setAuthMessage("All fields required", true);
+        return;
+    }
+
+    try {
+        await apiRequest("/auth/register", "POST", { name, email, password });
+        setAuthMessage("Registration successful! Please login.");
+        $("loginEmail").value = email;
+        $("loginPassword").value = "";
+        document.querySelector('[data-tab="login"]').click();
+    } catch (err) {
+        setAuthMessage(err.message, true);
+    }
+}
+
+function logout() {
+    state.token = null;
+    state.adminToken = null;
+    localStorage.removeItem("auctionToken");
+    if (state.socket) {
+        state.socket.disconnect();
+        state.socket = null;
+    }
+    state.connected = false;
+    setStatus("Disconnected");
+    updateAuthUI();
+    log("Logged out");
+}
+
+document.querySelectorAll(".tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+        tab.classList.add("active");
+        
+        if (tab.dataset.tab === "login") {
+            $("loginForm").classList.remove("hidden");
+            $("registerForm").classList.add("hidden");
+        } else {
+            $("loginForm").classList.add("hidden");
+            $("registerForm").classList.remove("hidden");
+        }
+    });
+});
+
+$("btnLogin").addEventListener("click", login);
+$("btnRegister").addEventListener("click", register);
+
+const savedToken = localStorage.getItem("auctionToken");
+if (savedToken) {
+    state.token = savedToken;
+    updateAuthUI();
+}
+
+async function listAuctions() {
+    try {
+        const data = await apiRequest("/auction", "GET", null, state.adminToken);
+        const list = $("auctionsList");
+        list.innerHTML = "";
+        
+        if (!data.auctions || data.auctions.length === 0) {
+            list.innerHTML = "<div>No auctions found</div>";
+            return;
+        }
+
+        data.auctions.forEach(auction => {
+            const row = document.createElement("div");
+            row.className = "joined-item";
+            row.innerHTML = `
+                <span>ID: ${auction.id} | ${auction.title} | Status: ${auction.status}</span>
+            `;
+            list.appendChild(row);
+        });
+        
+        setAdminMessage(`Found ${data.auctions.length} auctions`);
+    } catch (err) {
+        setAdminMessage(err.message, true);
+    }
+}
+
+async function startAuction(auctionId) {
+    try {
+        await apiRequest(`/auction/${auctionId}/start`, "PUT", null, state.adminToken);
+        setAdminMessage(`Auction ${auctionId} started`);
+        listAuctions();
+    } catch (err) {
+        setAdminMessage(err.message, true);
+    }
+}
+
+async function endAuction(auctionId) {
+    try {
+        await apiRequest(`/auction/${auctionId}/end`, "PUT", null, state.adminToken);
+        setAdminMessage(`Auction ${auctionId} ended`);
+        listAuctions();
+    } catch (err) {
+        setAdminMessage(err.message, true);
+    }
+}
+
+async function createAuction() {
+    const title = $("createTitleInput").value.trim();
+    const description = $("createDescInput").value.trim();
+    const startPrice = Number($("createPriceInput").value);
+    const duration = Number($("createDurationInput").value);
+
+    if (!title || !description || !startPrice || !duration) {
+        setCreateMessage("All fields required", true);
+        return;
+    }
+
+    try {
+        const data = await apiRequest("/auction", "POST", {
+            title,
+            description,
+            startPrice,
+            startTime: new Date().toISOString(),
+            duration
+        }, state.adminToken);
+        setCreateMessage(`Auction created with ID: ${data.auction.id}`);
+        $("createTitleInput").value = "";
+        $("createDescInput").value = "";
+        $("createPriceInput").value = "";
+        $("createDurationInput").value = "";
+        listAuctions();
+    } catch (err) {
+        setCreateMessage(err.message, true);
+    }
+}
 
 function formatRemainingTime(milliseconds) {
     if (milliseconds <= 0) return "Ended";
@@ -403,6 +620,56 @@ $("btnBid").addEventListener("click", () => {
     if (!amount || amount <= 0) return log("Enter a valid bid amount");
     selectAuction(selected);
     realtime.placeBid(amount);
+});
+
+$("btnListAuctions").addEventListener("click", () => {
+    state.adminToken = $("adminTokenInput").value.trim();
+    if (!state.adminToken) {
+        setAdminMessage("Token required", true);
+        return;
+    }
+    listAuctions();
+});
+
+$("btnCreateAuction").addEventListener("click", () => {
+    state.adminToken = $("adminTokenInput").value.trim();
+    if (!state.adminToken) {
+        setCreateMessage("Token required", true);
+        return;
+    }
+    createAuction();
+});
+
+$("btnStartAuction").addEventListener("click", () => {
+    const id = $("adminAuctionIdInput").value.trim();
+    if (!id) {
+        setAdminMessage("Auction ID required", true);
+        return;
+    }
+    if (!state.adminToken) {
+        state.adminToken = $("adminTokenInput").value.trim();
+    }
+    if (!state.adminToken) {
+        setAdminMessage("Token required", true);
+        return;
+    }
+    startAuction(id);
+});
+
+$("btnEndAuction").addEventListener("click", () => {
+    const id = $("adminAuctionIdInput").value.trim();
+    if (!id) {
+        setAdminMessage("Auction ID required", true);
+        return;
+    }
+    if (!state.adminToken) {
+        state.adminToken = $("adminTokenInput").value.trim();
+    }
+    if (!state.adminToken) {
+        setAdminMessage("Token required", true);
+        return;
+    }
+    endAuction(id);
 });
 
 setTimeout(() => {

@@ -104,6 +104,11 @@ button.secondary {
   color: #3c2a0f;
 }
 
+button.danger {
+  background: #c0392b;
+  color: #fff;
+}
+
 .row {
   display: flex;
   gap: 8px;
@@ -162,4 +167,40 @@ button.secondary {
 .joined-item button {
   padding: 6px 10px;
   font-size: 12px;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.tab {
+  flex: 1;
+  background: var(--border);
+  color: var(--ink);
+}
+
+.tab.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.auth-card {
+  grid-column: 1 / -1;
+}
+
+.user-info {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.user-info button {
+  padding: 6px 10px;
+  font-size: 12px;
+  margin-left: 10px;
 }
