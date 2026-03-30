@@ -134,3 +134,22 @@ exports.resetPassword = async (req, res, next) => {
         next(err);
     }
 };
+
+exports.getMe = async (req, res, next) => {
+    try {
+        const user = await User.findByPk(req.user.userId, {
+            attributes: ['id', 'name', 'email', 'registeredAt']
+        });
+
+        if (!user) {
+            const err = new Error('User not found');
+            err.statusCode = 404;
+            throw err;
+        }
+
+        res.status(200).json({ user });
+    } catch (err) {
+        if (!err.statusCode) err.statusCode = 500;
+        next(err);
+    }
+};

@@ -7,6 +7,7 @@ const {Server} = require('socket.io');
 
 const authRouter = require('./routes/auth.route');
 const auctionRouter = require('./routes/auction.route');
+const userRouter = require('./routes/user.route');
 const {connectDb, sequelize} = require('./utils/db');
 const {isAuthenticated} = require("./middlewares/is_authenticated");
 const {socketAuthentication} = require('./middlewares/socket_authentication');
@@ -57,6 +58,7 @@ setInterval(async () => {
 
 app.use('/auth', authRouter);
 app.use('/auction', isAuthenticated, auctionRouter);
+app.use('/users', isAuthenticated, userRouter);
 
 app.use((req, res) => {
     res.status(404).json({error: 'Not found'});
